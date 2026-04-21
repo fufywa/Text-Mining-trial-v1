@@ -162,6 +162,18 @@ WEIGHT_PLAIN = 1.0
 
 _PUNCT_STRIP = re.compile(r"[" + re.escape(string.punctuation.replace("-", "")) + r"]")
 
+# =============================================================================
+# SESSION STATE INIT — editable settings stored in session state
+# (so changes survive Streamlit reruns)
+# =============================================================================
+
+if "ss_stops" not in st.session_state:
+    st.session_state["ss_stops"] = set(NEUTRAL_STOPS)
+if "ss_merges" not in st.session_state:
+    st.session_state["ss_merges"] = dict(FRAGRANCE_MERGES)
+if "ss_protect" not in st.session_state:
+    st.session_state["ss_protect"] = set(PREFIX_STRIP_PROTECT)
+
 
 # =============================================================================
 # ▌BLOCK 2 — V3 PIPELINE STEPS
@@ -186,9 +198,10 @@ def step4_tokenize(text: str) -> List[str]:
     return [t for t in _PUNCT_STRIP.sub("", text).split() if t]
 
 def step5_prefix_strip(tokens: List[str]) -> List[str]:
+    protect = st.session_state["ss_protect"]
     result = []
     for tok in tokens:
-        if tok in PREFIX_STRIP_PROTECT:
+        if tok in protect:
             result.append(tok); continue
         stripped = False
         for pref in NEGATIVE_PREFIXES:
@@ -212,11 +225,13 @@ def step6_lemmatize(tokens: List[str]) -> List[str]:
     return out
 
 def step5_5_synonym_merge(tokens: List[str]) -> List[str]:
-    return [FRAGRANCE_MERGES.get(tok, tok) for tok in tokens]
+    merges = st.session_state["ss_merges"]
+    return [merges.get(tok, tok) for tok in tokens]
 
 def step7_stopword_removal(tokens: List[str]) -> List[str]:
+    stops = st.session_state["ss_stops"]
     return [t for t in tokens if t in NEGATION_TERMS or t in INTENSITY_MAP
-            or "_" in t or t not in NEUTRAL_STOPS]
+            or "_" in t or t not in stops]
 
 def step7_5_intensity_normalize(tokens: List[str]) -> List[str]:
     return [INTENSITY_MAP.get(t, t) for t in tokens]
@@ -591,41 +606,59 @@ if "processed_df" in st.session_state:
             st.write("**Current Stopwords**")
             stops_text = st.text_area(
                 "Edit stopwords (comma-separated)",
-                value=", ".join(sorted(NEUTRAL_STOPS)),
-                height=200
+                value=", ".join(sorted(st.session_state["ss_stops"])),
+                height=200,
+                key="stops_textarea"
             )
 
         with col_right:
             st.write("**Fragrance Merges**")
             merges_text = st.text_area(
                 "Edit merges (one per line: variant → canonical)",
-                value="\n".join(f"{k} → {v}" for k, v in sorted(FRAGRANCE_MERGES.items())),
-                height=200
+                value="\n".join(
+                    f"{k} → {v}"
+                    for k, v in sorted(st.session_state["ss_merges"].items())
+                ),
+                height=200,
+                key="merges_textarea"
             )
 
         st.write("**Prefix Strip Protect**")
         protect_text = st.text_area(
             "Edit protected words (comma-separated)",
-            value=", ".join(sorted(PREFIX_STRIP_PROTECT)),
-            height=100
+            value=", ".join(sorted(st.session_state["ss_protect"])),
+            height=100,
+            key="protect_textarea"
         )
 
         if st.button("💾 Apply & Re-Process"):
-            # Update stopwords
-            new_stops = {x.strip().lower() for x in stops_text.split(",") if x.strip()}
-            NEUTRAL_STOPS.clear(); NEUTRAL_STOPS.update(new_stops)
-            # Update merges
+            # Save stopwords to session state
+            st.session_state["ss_stops"] = {
+                x.strip().lower() for x in stops_text.split(",") if x.strip()
+            }
+            # Save merges to session state
             new_merges = {}
             for line in merges_text.splitlines():
                 if "→" in line:
                     parts = line.split("→", 1)
                     if len(parts) == 2:
                         new_merges[parts[0].strip().lower()] = parts[1].strip().lower()
-            FRAGRANCE_MERGES.clear(); FRAGRANCE_MERGES.update(new_merges)
-            # Update protect
-            new_protect = {x.strip().lower() for x in protect_text.split(",") if x.strip()}
-            PREFIX_STRIP_PROTECT.clear(); PREFIX_STRIP_PROTECT.update(new_protect)
-            st.success("Settings updated — click 🚀 Run Analysis to re-process.")
+            st.session_state["ss_merges"] = new_merges
+            # Save protect to session state
+            st.session_state["ss_protect"] = {
+                x.strip().lower() for x in protect_text.split(",") if x.strip()
+            }
+            # Re-run pipeline on existing data
+            if "processed_df" in st.session_state:
+                df_reprocess = st.session_state["processed_df"].copy()
+                v_col_r = st.session_state["v_col"]
+                with st.spinner("Re-processing with new settings…"):
+                    df_reprocess["tokens"]    = df_reprocess[v_col_r].apply(process_verbatim)
+                    df_reprocess["token_str"] = df_reprocess["tokens"].apply(tokens_to_string)
+                st.session_state["processed_df"] = df_reprocess
+                st.success("✅ Settings updated and data re-processed!")
+            else:
+                st.success("✅ Settings saved — upload data and run analysis to apply.")
 
 else:
     for tab in [tab1, tab2, tab3, tab4, tab6, tab5]:
