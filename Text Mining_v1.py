@@ -274,8 +274,10 @@ def process_verbatim(raw_text: str) -> List[str]:
     return step9_dedup(all_tokens)
 
 def tokens_to_string(tokens: List[str]) -> str:
-    """Convert token list to space-joined string for vectorizers."""
-    return " ".join(t.replace("_", " ") for t in tokens)
+    """Convert token list to space-joined string for vectorizers.
+    Underscores are preserved so very_pleasant / not_clean stay as single tokens.
+    """
+    return " ".join(tokens)
 
 def get_weight(token: str) -> float:
     return WEIGHT_VERY if token.startswith("very_") else WEIGHT_PLAIN
@@ -291,12 +293,16 @@ def get_bucket(token: str) -> str:
 # =============================================================================
 
 def generate_word_cloud(token_series: pd.Series, palette: str, shape: str):
-    """Build weighted word cloud from token lists."""
+    """Build weighted word cloud from token lists.
+    Tokens like very_pleasant / not_clean are kept as single units for frequency,
+    but displayed with spaces for readability.
+    """
     weight_counter: Counter = Counter()
     for tokens in token_series:
         if isinstance(tokens, list):
             for t in tokens:
-                weight_counter[t.replace("_", " ")] += get_weight(t)
+                display = t.replace("_", " ")
+                weight_counter[display] += get_weight(t)
     if not weight_counter:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No text available", ha="center"); ax.axis("off")
