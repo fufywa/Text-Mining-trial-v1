@@ -308,159 +308,118 @@ def get_bucket(token: str) -> str:
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Wordcloud colour schemes
-# Each scheme maps three semantic tiers to hex colours:
-#   "high"   → very_X tokens  (amplified positives) — largest words
-#   "mid"    → plain positive tokens                 — medium words
-#   "neg"    → not_X tokens   (negatives)            — always red-family
+# Image-1 style: serif font, 3-tier size-based colouring
 #
-# Font-size breakpoints (exclusive upper bound):
-#   high  : font_size >= HIGH_THRESH
-#   mid   : MID_THRESH <= font_size < HIGH_THRESH
-#   low   : font_size < MID_THRESH
+# Palette definitions — each is a dict with keys:
+#   high  : colour for dominant words  (font_size >= HIGH_T)
+#   mid   : colour for medium words    (MID_T <= font_size < HIGH_T)
+#   low   : colour for peripheral words (font_size < MID_T)
+#   neg   : colour for not_X tokens    (always override)
+#   bg    : background colour
 # ---------------------------------------------------------------------------
+_HIGH_T = 45   # font-size threshold: high tier
+_MID_T  = 22   # font-size threshold: mid tier
 
-CLOUD_PALETTES: dict[str, dict] = {
-    "Plum & Slate": {
-        "high": "#663871",   # deep plum  — amplified
-        "mid":  "#333333",   # near-black — standard
-        "low":  "#6B6B6B",   # mid-grey   — peripheral
-        "neg":  "#C0392B",   # red        — negatives
-        "bg":   "white",
-    },
-    "Ocean Depths": {
-        "high": "#1A5276",   # deep navy
-        "mid":  "#1F618D",   # ocean blue
-        "low":  "#7FB3D3",   # pale blue
-        "neg":  "#C0392B",
-        "bg":   "white",
-    },
-    "Forest & Moss": {
-        "high": "#1E8449",   # deep green
-        "mid":  "#27AE60",   # leaf green
-        "low":  "#82E0AA",   # light mint
-        "neg":  "#C0392B",
-        "bg":   "white",
-    },
-    "Amber Warmth": {
-        "high": "#784212",   # dark amber
-        "mid":  "#CA6F1E",   # warm orange
-        "low":  "#F0B27A",   # pale sand
-        "neg":  "#C0392B",
-        "bg":   "white",
-    },
-    "Rose & Ivory": {
-        "high": "#922B21",   # deep rose
-        "mid":  "#CB4335",   # warm red
-        "low":  "#F1948A",   # blush
-        "neg":  "#5B2C6F",   # purple for negatives (contrast)
-        "bg":   "#FFFDF8",
-    },
+CLOUD_PALETTES = {
+    "Plum & Slate":   {"high": "#5B1F6B", "mid": "#2E2E2E", "low": "#7A7A7A", "neg": "#C0392B", "bg": "white"},
+    "Ocean Depths":   {"high": "#154360", "mid": "#1A5276", "low": "#7FB3D3", "neg": "#C0392B", "bg": "white"},
+    "Forest & Moss":  {"high": "#1E5631", "mid": "#27AE60", "low": "#82E0AA", "neg": "#C0392B", "bg": "white"},
+    "Amber Warmth":   {"high": "#6E2C00", "mid": "#CA6F1E", "low": "#F0B27A", "neg": "#C0392B", "bg": "white"},
+    "Rose & Ivory":   {"high": "#7B241C", "mid": "#CB4335", "low": "#F1948A", "neg": "#5B2C6F", "bg": "#FFFDF8"},
 }
 
-# font-size thresholds that separate tiers
-_HIGH_THRESH = 33
-_MID_THRESH  = 15
+# Serif fonts to try in order (first found wins)
+_SERIF_CANDIDATES = [
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSerif.ttf",
+]
+
+def _find_serif_font() -> str | None:
+    for path in _SERIF_CANDIDATES:
+        if Path(path).exists():
+            return path
+    return None   # WordCloud will fall back to its built-in font
+
+_SERIF_FONT = _find_serif_font()
 
 
 def _make_color_func(scheme: dict, word_buckets: dict):
-    """
-    Returns a WordCloud-compatible color_func.
-
-    colour logic (priority order):
-      1. not_X tokens  → always scheme["neg"]
-      2. very_X tokens → scheme["high"]  (they land in the largest size band)
-      3. size >= HIGH_THRESH → scheme["high"]
-      4. size >= MID_THRESH  → scheme["mid"]
-      5. else                → scheme["low"]
-    """
+    """Return a WordCloud color_func using size-tier + bucket logic."""
     def color_func(word, font_size, position, orientation, font_path, random_state):
-        # word display has spaces instead of underscores; recover raw token key
-        raw = word.replace(" ", "_")
+        raw    = word.replace(" ", "_")
         bucket = word_buckets.get(raw, word_buckets.get(word, "positive"))
-
         if bucket == "negative":
             return scheme["neg"]
         if bucket == "positive_amplified":
             return scheme["high"]
-        # plain positives — fall back to size-based tier
-        if font_size >= _HIGH_THRESH:
-            return scheme["high"]
-        if font_size >= _MID_THRESH:
-            return scheme["mid"]
+        # plain positive — size tier
+        if font_size >= _HIGH_T: return scheme["high"]
+        if font_size >= _MID_T:  return scheme["mid"]
         return scheme["low"]
-
     return color_func
 
 
 def generate_word_cloud(token_series: pd.Series, palette: str, shape: str):
-    """Build weighted word cloud from token lists.
-
-    Tokens like very_pleasant / not_clean are kept as single units for
-    frequency counting; underscores are replaced with spaces for display.
-    Colour is driven by token bucket (negative / amplified / plain) and
-    font-size tier, using the chosen ``palette`` from CLOUD_PALETTES.
-    Falls back gracefully when ``palette`` is a legacy matplotlib colormap
-    name (not in CLOUD_PALETTES) — renders in greyscale instead.
+    """Build a weighted word cloud styled after the Image-1 reference:
+    serif font, 3-tier size-based colouring, tight packing.
     """
     weight_counter: Counter = Counter()
-    # also track the bucket of every display word (last-write wins; consistent)
-    word_buckets: dict[str, str] = {}
+    word_buckets:   dict    = {}
 
     for tokens in token_series:
         if isinstance(tokens, list):
             for t in tokens:
                 display = t.replace("_", " ")
                 weight_counter[display] += get_weight(t)
-                word_buckets[display] = get_bucket(t)
+                word_buckets[display]    = get_bucket(t)
 
     if not weight_counter:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No text available", ha="center")
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.text(0.5, 0.5, "No text available", ha="center", fontsize=14)
         ax.axis("off")
         return fig
 
     # ── Shape mask ────────────────────────────────────────────────────────
+    cw, ch = 1040, 520      # 2:1 aspect — matches Image 1
     mask = None
-    canvas_w, canvas_h = 1600, 900
     if shape == "Round":
-        canvas_w = canvas_h = 900
-        img  = Image.new("L", (canvas_w, canvas_h), 255)
+        cw = ch = 700
+        img  = Image.new("L", (cw, ch), 255)
         draw = ImageDraw.Draw(img)
-        pad  = 30
-        draw.ellipse((pad, pad, canvas_w - pad, canvas_h - pad), fill=0)
+        draw.ellipse((20, 20, cw - 20, ch - 20), fill=0)
         mask = np.array(img)
 
     # ── Colour scheme ─────────────────────────────────────────────────────
-    scheme = CLOUD_PALETTES.get(palette)
-
-    if scheme:
-        color_func = _make_color_func(scheme, word_buckets)
-        bg_color   = scheme["bg"]
-        wc_kwargs  = dict(color_func=color_func, background_color=bg_color)
-    else:
-        # Legacy matplotlib colormap name passed in — honour it gracefully
-        wc_kwargs  = dict(colormap=palette, background_color="white")
+    scheme      = CLOUD_PALETTES.get(palette, CLOUD_PALETTES["Plum & Slate"])
+    color_func  = _make_color_func(scheme, word_buckets)
 
     # ── Build cloud ───────────────────────────────────────────────────────
-    wc = WordCloud(
-        width=canvas_w,
-        height=canvas_h,
-        mask=mask,
-        collocations=False,
-        regexp=r"\S+",            # keep "not clean" / "very fresh" as units
-        min_font_size=10,
-        max_font_size=120,
-        relative_scaling=0.55,
-        prefer_horizontal=0.85,
-        scale=2,
-        **wc_kwargs,
-    ).generate_from_frequencies(weight_counter)
+    wc_kwargs = dict(
+        color_func       = color_func,
+        background_color = scheme["bg"],
+        font_path        = _SERIF_FONT,   # None → built-in font (still works)
+        width            = cw,
+        height           = ch,
+        mask             = mask,
+        collocations     = False,
+        regexp           = r"\S+",
+        min_font_size    = 8,
+        max_font_size    = 120,
+        relative_scaling = 0.55,
+        prefer_horizontal= 0.85,
+        margin           = 2,
+        scale            = 3,
+        max_words        = 200,
+    )
 
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    wc = WordCloud(**wc_kwargs).generate_from_frequencies(weight_counter)
+
+    fig, ax = plt.subplots(figsize=(10, 5), facecolor=scheme["bg"])
     ax.imshow(wc, interpolation="bilinear")
     ax.axis("off")
-    fig.patch.set_facecolor(wc_kwargs.get("background_color", "white"))
+    fig.patch.set_facecolor(scheme["bg"])
     plt.tight_layout(pad=0)
     return fig
 
@@ -539,9 +498,8 @@ with st.sidebar:
     shape_opt   = st.radio("Cloud Shape", ["Rectangle", "Round"])
     palette_opt = st.selectbox(
         "Cloud Palette",
-        list(CLOUD_PALETTES.keys()) + ["copper", "GnBu", "RdPu", "viridis", "Spectral"],
-        help="Named palettes use semantic bucket colouring. "
-             "Legacy matplotlib names fall back to uniform colourmap."
+        list(CLOUD_PALETTES.keys()),
+        help="Dominant words = darkest shade · mid words = medium · small words = light · not_X = red"
     )
 
     if uploaded_file:
