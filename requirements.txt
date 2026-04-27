@@ -11,3 +11,4 @@ networkx
 python-louvain
 scipy
 openpyxl
+pyspellchecker
