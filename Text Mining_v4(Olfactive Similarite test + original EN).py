@@ -418,6 +418,19 @@ def build_dictionary_mapping(dict_path: str) -> tuple[dict, list]:
     except Exception:
         return {}, []
 
+    # Top-level "NET" rows that aggregate all sub-dimensions — exclude them
+    # to avoid double-counting and over-weighting
+    EXCLUDE_DIMS = {
+        "Emotion | Postive Emotion",
+        "Emotion | Negative Emotion",
+        "Emotion | Nostaglia Emotion",
+        "Olfactive | Negative Description",
+        "Olfactive | Negative Descriptions",
+        "Emotion | Postive Emotions",
+        "Emotion | Negative Emotions",
+        "Emotion | Nostaglia Emotions",
+    }
+
     dimensions: list = []
     token_to_dim: dict = {}
 
@@ -425,6 +438,8 @@ def build_dictionary_mapping(dict_path: str) -> tuple[dict, list]:
         perception = str(row["Perception"]).strip()
         sentiment  = str(row["Sentiment"]).strip()
         dim_key    = f"{perception} | {sentiment}"
+        if dim_key in EXCLUDE_DIMS:
+            continue
         if dim_key not in dimensions:
             dimensions.append(dim_key)
 
