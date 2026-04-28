@@ -57,6 +57,9 @@ def setup_spellchecker():
     sc.word_frequency.load_words(SPELL_PROTECT)
     return sc
 
+# Module-level spell checker — initialised once, reused across all verbatims
+_spell = setup_spellchecker()
+
 lemmatizer = setup_nltk()
 
 CONTRACTION_MAP: dict[str, str] = {
@@ -340,18 +343,26 @@ def get_category_stops(category: str) -> set:
                 break
     return CATEGORY_STOPS.get(key, set()) if key else set()
 
+@st.cache_data(show_spinner=False)
+def _cached_correction(tok: str) -> str:
+    """Cache spell corrections so identical tokens are only computed once."""
+    result = _spell.correction(tok)
+    return result if result else tok
+
 def step3_5_spell_correct(tokens: List[str]) -> List[str]:
-    spell = setup_spellchecker()
     spell_protect = st.session_state["ss_spell_protect"]
     candidates = [t for t in tokens if t not in spell_protect and "_" not in t and len(t) > 1]
-    unknown = spell.unknown(candidates)
+    if not candidates:
+        return tokens
+    unknown = _spell.unknown(candidates)
+    if not unknown:
+        return tokens
     out = []
     for tok in tokens:
         if tok in spell_protect or "_" in tok or len(tok) <= 1 or tok not in unknown:
             out.append(tok)
         else:
-            correction = spell.correction(tok)
-            out.append(correction if correction else tok)
+            out.append(_cached_correction(tok))
     return out
 
 def step5_prefix_strip(tokens: List[str]) -> List[str]:
@@ -367,6 +378,7 @@ def step5_prefix_strip(tokens: List[str]) -> List[str]:
         if not stripped: result.append(tok)
     return result
 
+@st.cache_data(show_spinner=False)
 def _get_wordnet_pos(word: str):
     tag = nltk.pos_tag([word])[0][1][0].upper()
     return {"J": wordnet.ADJ, "V": wordnet.VERB,
