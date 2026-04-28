@@ -12,3 +12,4 @@ python-louvain
 scipy
 openpyxl
 pyspellchecker
+sentence-transformers
