@@ -52,13 +52,10 @@ def setup_nltk():
     return WordNetLemmatizer()
 
 @st.cache_resource
-def setup_spellchecker():
+def setup_spellchecker(protect_words: frozenset):
     sc = SpellChecker()
-    sc.word_frequency.load_words(SPELL_PROTECT)
+    sc.word_frequency.load_words(protect_words)
     return sc
-
-# Module-level spell checker — initialised once, reused across all verbatims
-_spell = setup_spellchecker()
 
 lemmatizer = setup_nltk()
 
@@ -191,6 +188,9 @@ SPELL_PROTECT: set = {
     "incredibly", "super", "highly", "deeply", "absolutely",
     "totally", "quite", "pretty", "awfully", "terribly", "remarkably",
 }
+
+# Module-level spell checker — initialised once after SPELL_PROTECT is defined
+_spell = setup_spellchecker(frozenset(SPELL_PROTECT))
 
 # --- Category-specific stopwords ---
 CATEGORY_STOPS: Dict[str, set] = {
