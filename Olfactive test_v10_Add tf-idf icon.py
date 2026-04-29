@@ -619,16 +619,31 @@ def run_fca(df: pd.DataFrame, p_col: str, fmin: int, use_tfidf: bool):
 # ▌BLOCK 3B — SIMILARITY
 # =============================================================================
 
-def compute_raw_similarity(token_str_a: pd.Series, token_str_b: pd.Series) -> float:
+def compute_raw_similarity(token_str_a: pd.Series, token_str_b: pd.Series,
+                            all_token_strs: pd.Series = None,
+                            use_tfidf: bool = True) -> float:
     """
-    Raw TF-IDF cosine similarity between two fragrances.
-    Vocabulary built from only these two documents.
+    Cosine similarity between two fragrances.
+
+    use_tfidf=True  → TF-IDF: IDF fitted on full corpus (all_token_strs) so
+                      words common across all fragrances get low weight,
+                      distinctive words get high weight.
+    use_tfidf=False → CountVectorizer: raw word counts, no IDF weighting.
+
+    all_token_strs: token_str column for ALL fragrances in the file.
+                    Required for meaningful IDF when use_tfidf=True.
     """
-    doc_a = " ".join(token_str_a)
-    doc_b = " ".join(token_str_b)
+    doc_a  = " ".join(token_str_a)
+    doc_b  = " ".join(token_str_b)
     try:
-        vec = TfidfVectorizer(token_pattern=r"(?u)\b\S+\b")
-        mat = vec.fit_transform([doc_a, doc_b])
+        if use_tfidf:
+            vec    = TfidfVectorizer(token_pattern=r"(?u)\b\S+\b")
+            corpus = list(all_token_strs) if all_token_strs is not None else [doc_a, doc_b]
+            vec.fit(corpus)               # IDF from full corpus
+            mat = vec.transform([doc_a, doc_b])
+        else:
+            vec = CountVectorizer(token_pattern=r"(?u)\b\S+\b")
+            mat = vec.fit_transform([doc_a, doc_b])
         return float(cosine_similarity(mat)[0][1])
     except Exception:
         return 0.0
@@ -821,7 +836,10 @@ if "processed_df" in st.session_state:
             raw_scores = []
             for cand in cand_sel:
                 cand_tokens = df[df[p_col].astype(str) == cand]["token_str"]
-                raw_scores.append(compute_raw_similarity(ref_tokens, cand_tokens))
+                raw_scores.append(compute_raw_similarity(
+                    ref_tokens, cand_tokens,
+                    all_token_strs=df["token_str"],
+                    use_tfidf=use_tfidf))
 
             # ── stretch or raw ────────────────────────────────────────────
             if use_stretch:
