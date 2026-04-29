@@ -163,6 +163,35 @@ NEUTRAL_STOPS = {
     "because", "until", "further", "too", "very",
     "therefore", "hence", "thus", "already",
     "indeed", "perhaps", "maybe",
+    # Adverbs / filler opinions with no olfactive value
+    "upon", "always", "slightly", "found", "try", "afterward", "afterwards",
+    "opinion", "overall", "generally", "usually", "often", "sometimes",
+    "never", "ever", "rather", "quite", "fairly", "nearly", "almost",
+    "mostly", "mainly", "largely", "particularly", "especially", "specifically",
+    "certain", "certainly", "definitely", "absolutely", "completely", "totally",
+    "actually", "basically", "essentially", "literally", "personally",
+    "immediately", "quickly", "slowly", "suddenly", "finally", "eventually",
+    "initially", "originally", "previously", "recently", "currently",
+    "anyway", "anyhow", "somehow", "somewhere", "sometime", "sometimes",
+    "seem", "seems", "seemed", "appear", "appears", "appeared",
+    "become", "became", "becomes", "keep", "kept", "keeps",
+    "want", "wanted", "wants", "need", "needed", "needs",
+    "try", "tried", "tries", "start", "started", "begin", "began",
+    "way", "ways", "thing", "things", "stuff", "bit", "bits",
+    "lot", "lots", "number", "amount", "kind", "type", "sort",
+    "big", "small", "long", "short", "high", "low",
+    "same", "whole", "entire", "full",
+    "able", "unable", "likely", "unlikely", "possible", "impossible",
+    "know", "knew", "known", "think", "thought", "feel", "felt",
+    "mean", "meant", "means", "show", "showed", "shown",
+    "tell", "told", "told", "ask", "asked", "answer", "answered",
+    "plus", "minus", "around", "along", "across", "within", "without",
+    "since", "although", "though", "whereas", "while", "whenever",
+    "whether", "whatever", "wherever", "whoever", "however", "whichever",
+    "nobody", "nothing", "nowhere", "someone", "somewhere", "something",
+    "anyone", "anywhere", "everyone", "everywhere", "everything",
+    "myself", "yourself", "himself", "herself", "itself", "ourselves",
+    "mr", "mrs", "ms", "dr", "etc", "ie", "eg",
 }
 
 FRAGRANCE_MERGES = {
@@ -216,14 +245,16 @@ SPELL_PROTECT: set = {
     "totally", "quite", "pretty", "awfully", "terribly", "remarkably",
 }
 
-_spell = _init_spellchecker(frozenset(SPELL_PROTECT))
+@st.cache_resource(show_spinner=False)
+def _get_spell():
+    return _init_spellchecker(frozenset(SPELL_PROTECT))
 
 # Simple dict cache so identical misspelled tokens are only corrected once
 _correction_cache: Dict[str, str] = {}
 
 def _cached_correction(tok: str) -> str:
     if tok not in _correction_cache:
-        result = _spell.correction(tok)
+        result = _get_spell().correction(tok)
         _correction_cache[tok] = result if result else tok
     return _correction_cache[tok]
 
@@ -239,7 +270,7 @@ def step3_5_spell_correct(tokens: List[str]) -> List[str]:
     candidates = [t for t in tokens if t not in SPELL_PROTECT and "_" not in t and len(t) > 1]
     if not candidates:
         return tokens
-    unknown = _spell.unknown(candidates)
+    unknown = _get_spell().unknown(candidates)
     if not unknown:
         return tokens
     out = []
@@ -487,6 +518,17 @@ def step9_dedup(tokens: List[str]) -> List[str]:
     seen = set()
     return [t for t in tokens if not (t in seen or seen.add(t))]
 
+
+def step10_clean_orphans(tokens: List[str]) -> List[str]:
+    """
+    Remove standalone negation/intensity tokens that were not collapsed
+    into not_X / very_X bigrams — they carry no meaning on their own.
+    e.g. ["clean", "not", "fresh"] where "not" couldn't attach to anything.
+    Only removes if the token IS a bare negation/intensity word (no underscore).
+    """
+    orphans = (NEGATION_TERMS | set(INTENSITY_MAP.keys())) - {"no"}
+    return [t for t in tokens if t not in orphans]
+
 def process_verbatim(raw_text: str, autocorrect: bool = True,
                      category: str = None) -> List[str]:
     if not raw_text or not isinstance(raw_text, str): return []
@@ -503,7 +545,8 @@ def process_verbatim(raw_text: str, autocorrect: bool = True,
     tokens = step7_stopword_removal(tokens, cat_stops)
     tokens = step7_5_intensity_normalize(tokens)
     tokens = step8_ngram_collapse(tokens)
-    return step9_dedup(tokens)
+    tokens = step9_dedup(tokens)
+    return step10_clean_orphans(tokens)
 
 def tokens_to_string(tokens: List[str]) -> str:
     """Convert token list to space-joined string for vectorizers.
