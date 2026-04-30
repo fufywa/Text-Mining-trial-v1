@@ -191,7 +191,7 @@ NEUTRAL_STOPS = {
     "nobody", "nothing", "nowhere", "someone", "somewhere", "something",
     "anyone", "anywhere", "everyone", "everywhere", "everything",
     "myself", "yourself", "himself", "herself", "itself", "ourselves",
-    "mr", "mrs", "ms", "dr", "etc", "ie", "eg",
+    "mr", "mrs", "ms", "dr", "etc", "ie", "eg","open","bottle","opening","wet","dry"
 }
 
 FRAGRANCE_MERGES = {
@@ -286,19 +286,18 @@ CATEGORY_STOPS: Dict[str, set] = {
         "perfume", "fragrance", "scent", "spray", "bottle", "vial", "atomizer",
         "apply", "spritz", "spraying", "wrist", "neck", "wear", "wearing", "wore",
         "longevity", "sillage", "projection", "trail", "top", "heart", "base",
-        "accord", "nose", "house", "brand", "collection", "launch", "release",
+        "accord", "nose", "house", "brand", "collection", "launch", 
     },
     "laundry_detergent": {
         "laundry", "wash", "washing", "rinse", "spin", "cycle", "machine",
         "clothes", "clothing", "garment", "garments", "fabric", "fabrics", "linen",
         "detergent", "powder", "liquid", "capsule", "pod", "dose",
-        "stain", "stains", "dirt", "dirty", "soil", "soiling",
-        "clean", "cleaning", "whiteness", "whitening", "brightness",
+        "stain", "stains", "dirt", "dirty", "soil", "soiling","release","bottle","dry","open","opening","wet"
     },
     "fabric_softener": {
         "softener", "conditioner", "soften", "softer",
         "laundry", "wash", "washing", "clothes", "fabric", "linen",
-        "rinse", "cycle", "machine", "drying", "static", "wrinkle", "fluffy",
+        "rinse", "cycle", "machine", "drying", "static", "wrinkle", "bottle","dry","open","opening","wet"
     },
     "dishwashing": {
         "dish", "dishes", "washing", "wash", "rinse",
