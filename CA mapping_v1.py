@@ -1251,19 +1251,23 @@ if "processed_df" in st.session_state:
                 title_fontsize=8.5,
             )
 
-            # inertia bar inside plot
-            bar_ax = ax.inset_axes([0.01, 0.01, 0.14, 0.06])
-            bar_ax.barh(
-                ["Dim2", "Dim1"],
-                [dim2_pct, dim1_pct],
-                color=["#3498DB", "#E84393"], height=0.5
+            # inertia annotation box (bottom-left, avoids inset_axes unit conflict)
+            inertia_txt = (
+                f"Dim1: {dim1_pct}%\n"
+                f"Dim2: {dim2_pct}%\n"
+                f"Total: {dim1_pct + dim2_pct:.1f}%"
             )
-            bar_ax.set_xlim(0, 100)
-            bar_ax.set_xlabel("% inertia", fontsize=6.5)
-            bar_ax.tick_params(labelsize=6.5)
-            bar_ax.set_facecolor("white")
-            for spine in bar_ax.spines.values():
-                spine.set_edgecolor("#cccccc")
+            ax.text(
+                0.01, 0.01, inertia_txt,
+                transform=ax.transAxes,
+                fontsize=7.5, va="bottom", ha="left",
+                bbox=dict(
+                    boxstyle="round,pad=0.4",
+                    facecolor="white", edgecolor="#cccccc",
+                    alpha=0.85
+                ),
+                color="#444444", linespacing=1.5,
+            )
 
             plt.tight_layout()
             st.pyplot(fig, use_container_width=True)
