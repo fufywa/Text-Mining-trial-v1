@@ -27,8 +27,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import TruncatedSVD, NMF
 from sklearn.linear_model import Ridge
 from textblob import TextBlob
-import plotly.graph_objects as go
-import plotly.express as px
+import matplotlib.patheffects as pe
+from matplotlib.patches import Ellipse
 from PIL import Image, ImageDraw
 from collections import Counter
 
@@ -1072,24 +1072,24 @@ if "processed_df" in st.session_state:
     with tab3:
         st.subheader("🌐 Correspondence Analysis — Verbatim Token Map")
 
-        # ── Controls row ──────────────────────────────────────────────────
+        # ── Controls ──────────────────────────────────────────────────────
         ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 1])
         with ctrl1:
-            # Candidate vs Reference designation
             ref_products = st.multiselect(
                 "📌 Reference Products (benchmark / market)",
                 options=p_list,
                 default=p_list[:2] if len(p_list) >= 2 else p_list,
-                help="Shown as solid circles. All others are Candidates (stars)."
+                help="Shown as solid circles ●. All others are Candidates ★."
             )
         with ctrl2:
             n_words_show = st.slider(
                 "# Token labels to display", min_value=5, max_value=60,
                 value=20, step=5,
-                help="Shows the N most discriminating tokens on the map."
+                help="Top-N most discriminating tokens shown on map."
             )
         with ctrl3:
-            show_ellipses = st.toggle("Confidence ellipses", value=False)
+            show_ellipses = st.toggle("Ellipses", value=True,
+                                      help="Draw a rough uncertainty circle around each product.")
 
         # ── Run CA ────────────────────────────────────────────────────────
         res, err = run_ca(df, p_col, fmin_global)
@@ -1102,195 +1102,233 @@ if "processed_df" in st.session_state:
             dim1_pct = round(inertia_ratio[0] * 100, 1) if len(inertia_ratio) > 0 else 0
             dim2_pct = round(inertia_ratio[1] * 100, 1) if len(inertia_ratio) > 1 else 0
 
-            # ── Select top-N tokens by CA contribution ────────────────────
-            # Contribution = freq × squared distance from origin
-            token_dist2  = (col_coords[:, 0]**2 + col_coords[:, 1]**2)
+            # ── Token selection: top-N by CA contribution ─────────────────
+            token_dist2   = col_coords[:, 0]**2 + col_coords[:, 1]**2
             token_contrib = word_freqs * token_dist2
-            top_idx      = np.argsort(token_contrib)[-n_words_show:][::-1]
-            show_mask    = np.zeros(len(words), dtype=bool)
+            top_idx       = np.argsort(token_contrib)[-n_words_show:]
+            show_mask     = np.zeros(len(words), dtype=bool)
             show_mask[top_idx] = True
 
-            # ── Product type classification ───────────────────────────────
-            is_ref = [p in ref_products for p in products]
-
-            # Colour palette
+            # ── Colour palette ─────────────────────────────────────────────
             CAND_COLORS = [
                 "#E84393","#FF6B35","#9B59B6","#1ABC9C",
-                "#F39C12","#2ECC71","#E74C3C","#3498DB",
-                "#FF8C00","#00CED1","#DC143C","#32CD32",
+                "#F39C12","#27AE60","#E74C3C","#2980B9",
+                "#FF8C00","#00CED1","#8E44AD","#D35400",
             ]
-            REF_COLOR  = "#2C3E50"
+            REF_COLOR = "#2C3E50"
 
-            # ── Build Plotly figure ───────────────────────────────────────
-            fig = go.Figure()
+            is_ref = [p in ref_products for p in products]
 
-            # Draw axes
-            for val in [0]:
-                fig.add_hline(y=val, line_color="lightgrey", line_width=1)
-                fig.add_vline(x=val, line_color="lightgrey", line_width=1)
-
-            # ── Token word cloud layer (background) ───────────────────────
-            shown_words  = [words[i]      for i in range(len(words)) if show_mask[i]]
-            shown_cx     = [col_coords[i,0] for i in range(len(words)) if show_mask[i]]
-            shown_cy     = [col_coords[i,1] for i in range(len(words)) if show_mask[i]]
-            shown_freqs  = [word_freqs[i]   for i in range(len(words)) if show_mask[i]]
-            max_freq     = max(shown_freqs) if shown_freqs else 1
-
-            # Size proportional to frequency
-            token_sizes  = [8 + (f / max_freq) * 20 for f in shown_freqs]
-            token_alphas = [0.45 + (f / max_freq) * 0.35 for f in shown_freqs]
-
-            fig.add_trace(go.Scatter(
-                x=shown_cx, y=shown_cy,
-                mode="markers+text",
-                name="Tokens",
-                text=shown_words,
-                textposition="top center",
-                textfont=dict(size=10, color="rgba(120,80,40,0.75)"),
-                marker=dict(
-                    symbol="x",
-                    size=token_sizes,
-                    color="rgba(180,100,30,0.25)",
-                    line=dict(color="rgba(180,100,30,0.4)", width=1),
-                ),
-                hovertemplate=(
-                    "<b>%{text}</b><br>"
-                    "Dim1: %{x:.3f}<br>Dim2: %{y:.3f}<br>"
-                    "<extra></extra>"
-                ),
-            ))
-
-            # ── Product points ─────────────────────────────────────────────
+            # assign a colour to every product
+            prod_colors = []
             cand_idx = 0
-            for i, (prod, x, y, is_r) in enumerate(
-                    zip(products, row_coords[:, 0], row_coords[:, 1], is_ref)):
-
-                if is_r:
-                    color  = REF_COLOR
-                    symbol = "circle"
-                    size   = 22
-                    lw     = 3
-                    label  = prod
+            for r_flag in is_ref:
+                if r_flag:
+                    prod_colors.append(REF_COLOR)
                 else:
-                    color  = CAND_COLORS[cand_idx % len(CAND_COLORS)]
-                    symbol = "star"
-                    size   = 26
-                    lw     = 2
-                    label  = prod
+                    prod_colors.append(CAND_COLORS[cand_idx % len(CAND_COLORS)])
                     cand_idx += 1
 
-                # Top tokens for this product (for hover)
-                prod_tokens_str = df[df[p_col].astype(str) == str(prod)]["token_str"]
-                all_toks = " ".join(prod_tokens_str).split()
-                top_toks = ", ".join([t for t, _ in Counter(all_toks).most_common(8)])
+            # ── Figure ────────────────────────────────────────────────────
+            fig, ax = plt.subplots(figsize=(16, 11), facecolor="white")
+            ax.set_facecolor("#FAFAFA")
 
-                fig.add_trace(go.Scatter(
-                    x=[x], y=[y],
-                    mode="markers+text",
-                    name=prod,
-                    text=[label],
-                    textposition="top right",
-                    textfont=dict(
-                        size=12,
-                        color=color,
-                        family="Arial Black" if not is_r else "Arial",
-                    ),
-                    marker=dict(
-                        symbol=symbol,
-                        size=size,
-                        color=color,
-                        line=dict(color="white", width=lw),
-                        opacity=0.95,
-                    ),
-                    hovertemplate=(
-                        f"<b>{prod}</b><br>"
-                        f"{'📌 Reference' if is_r else '⭐ Candidate'}<br>"
-                        "Dim1: %{x:.3f}<br>Dim2: %{y:.3f}<br>"
-                        f"Top tokens: {top_toks}<br>"
-                        "<extra></extra>"
-                    ),
+            # Grid + axes
+            ax.axhline(0, color="#cccccc", linewidth=0.8, zorder=1)
+            ax.axvline(0, color="#cccccc", linewidth=0.8, zorder=1)
+            ax.grid(True, color="#eeeeee", linewidth=0.5, zorder=0)
+
+            # ── Draw tokens ───────────────────────────────────────────────
+            max_freq = word_freqs.max() if word_freqs.max() > 0 else 1
+            for i, (w, cx, cy, freq) in enumerate(
+                    zip(words, col_coords[:, 0], col_coords[:, 1], word_freqs)):
+                if not show_mask[i]:
+                    continue
+                norm_f = freq / max_freq
+                alpha  = 0.35 + norm_f * 0.45       # 0.35–0.80
+                fsize  = 8  + norm_f * 10            # 8–18 pt
+                ax.plot(cx, cy, marker="x", ms=5,
+                        color="#A0522D", alpha=alpha * 0.6, zorder=2)
+                txt = ax.text(
+                    cx, cy + 0.003, w,
+                    fontsize=fsize, ha="center", va="bottom",
+                    color="#7B3F00", alpha=alpha, zorder=3,
+                    fontweight="bold" if norm_f > 0.6 else "normal",
+                )
+                txt.set_path_effects([
+                    pe.withStroke(linewidth=2.5, foreground="white")
+                ])
+
+            # ── Draw products ─────────────────────────────────────────────
+            for i, (prod, color, r_flag) in enumerate(
+                    zip(products, prod_colors, is_ref)):
+                px_  = row_coords[i, 0]
+                py_  = row_coords[i, 1]
+
+                if r_flag:
+                    marker, ms, lw_edge, zorder = "o", 220, 2.5, 6
+                else:
+                    marker, ms, lw_edge, zorder = "*", 520, 1.5, 6
+
+                # optional rough ellipse (±1 spread)
+                if show_ellipses:
+                    n_v  = (df[p_col].astype(str) == str(prod)).sum()
+                    # radius shrinks with more respondents (less uncertainty)
+                    rad  = max(0.015, 0.06 / (n_v ** 0.3))
+                    ell  = Ellipse(
+                        (px_, py_), width=rad * 2.8, height=rad * 1.8,
+                        angle=0, linewidth=1.2, linestyle="--",
+                        edgecolor=color, facecolor=color, alpha=0.10, zorder=4
+                    )
+                    ax.add_patch(ell)
+
+                ax.scatter(
+                    px_, py_,
+                    s=ms, marker=marker, color=color,
+                    edgecolors="white", linewidths=lw_edge,
+                    zorder=zorder, label=f"{'[REF] ' if r_flag else ''}{prod}"
+                )
+
+                # Product label — wrapped at 20 chars, with outline
+                label_txt = "\n".join(
+                    prod[j:j+20] for j in range(0, len(prod), 20)
+                )
+                txt = ax.text(
+                    px_ + 0.004, py_ + 0.006,
+                    label_txt,
+                    fontsize=9.5,
+                    fontweight="bold" if not r_flag else "normal",
+                    color=color, zorder=7,
+                    va="bottom", ha="left",
+                )
+                txt.set_path_effects([
+                    pe.withStroke(linewidth=3, foreground="white")
+                ])
+
+            # ── Quadrant shading (light) ───────────────────────────────────
+            x0, x1 = ax.get_xlim() if ax.get_xlim()[0] != 0 else (-0.5, 0.5)
+            y0, y1 = ax.get_ylim() if ax.get_ylim()[0] != 0 else (-0.5, 0.5)
+            # re-fetch after scatter
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            for qx, qy, clr in [
+                (x0, 0,  "#FFF8F0"), (0, 0,   "#F0F8FF"),
+                (x0, y0, "#F0FFF0"), (0, y0,  "#FFF0F8"),
+            ]:
+                qw = (x1 - x0) / 2; qh = (y1 - y0) / 2
+                ax.add_patch(patches.Rectangle(
+                    (qx, qy), qw, qh,
+                    facecolor=clr, alpha=0.25, zorder=0
                 ))
 
-                # Optional: simple ellipse placeholder (radius of variability)
-                if show_ellipses:
-                    prod_df = df[df[p_col].astype(str) == str(prod)]
-                    prod_token_strs = prod_df["token_str"].tolist()
-                    n_v = len(prod_token_strs)
-                    if n_v >= 3:
-                        # Rough spread from token diversity
-                        spread = 0.05 + 0.03 * (1 / (n_v ** 0.5))
-                        theta  = np.linspace(0, 2 * np.pi, 40)
-                        ex     = x + spread * 1.6 * np.cos(theta)
-                        ey     = y + spread * np.sin(theta)
-                        fig.add_trace(go.Scatter(
-                            x=ex, y=ey,
-                            mode="lines",
-                            showlegend=False,
-                            line=dict(color=color, width=1.2, dash="dot"),
-                            hoverinfo="skip",
-                        ))
-
-            # ── Layout ────────────────────────────────────────────────────
-            fig.update_layout(
-                height=680,
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-                xaxis=dict(
-                    title=f"Dim 1 — {dim1_pct}% inertia",
-                    showgrid=True, gridcolor="#f0f0f0",
-                    zeroline=False, tickfont=dict(size=11),
-                ),
-                yaxis=dict(
-                    title=f"Dim 2 — {dim2_pct}% inertia",
-                    showgrid=True, gridcolor="#f0f0f0",
-                    zeroline=False, tickfont=dict(size=11),
-                    scaleanchor="x", scaleratio=1,   # keep aspect ratio square
-                ),
-                legend=dict(
-                    title="Products",
-                    x=1.01, y=1,
-                    bordercolor="#dddddd", borderwidth=1,
-                    bgcolor="rgba(255,255,255,0.9)",
-                    font=dict(size=11),
-                ),
-                margin=dict(l=60, r=220, t=40, b=60),
-                hovermode="closest",
+            # ── Axes labels & title ───────────────────────────────────────
+            ax.set_xlabel(
+                f"Dimension 1  —  {dim1_pct}% of inertia",
+                fontsize=12, labelpad=8, color="#333333"
+            )
+            ax.set_ylabel(
+                f"Dimension 2  —  {dim2_pct}% of inertia",
+                fontsize=12, labelpad=8, color="#333333"
+            )
+            ax.set_title(
+                f"Correspondence Analysis · Token × Product\n"
+                f"Total inertia explained: {dim1_pct + dim2_pct:.1f}%",
+                fontsize=14, fontweight="bold", pad=14, color="#1a1a1a"
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            # ── Legend ────────────────────────────────────────────────────
+            handles, labels_ = ax.get_legend_handles_labels()
+            legend = ax.legend(
+                handles, labels_,
+                loc="upper left",
+                bbox_to_anchor=(1.01, 1),
+                borderaxespad=0,
+                frameon=True,
+                framealpha=0.95,
+                edgecolor="#cccccc",
+                fontsize=8.5,
+                title="Products\n● = Reference   ★ = Candidate",
+                title_fontsize=8.5,
+            )
 
-            # ── Inertia summary ───────────────────────────────────────────
-            col_iner, col_leg = st.columns([3, 2])
-            with col_iner:
-                st.caption(
-                    f"**Total inertia explained by Dim1+Dim2: "
-                    f"{dim1_pct + dim2_pct:.1f}%** "
-                    f"(Dim1={dim1_pct}%, Dim2={dim2_pct}%)"
-                )
-            with col_leg:
-                st.caption("📌 Circle = Reference  |  ⭐ Star = Candidate")
+            # inertia bar inside plot
+            bar_ax = ax.inset_axes([0.01, 0.01, 0.14, 0.06])
+            bar_ax.barh(
+                ["Dim2", "Dim1"],
+                [dim2_pct, dim1_pct],
+                color=["#3498DB", "#E84393"], height=0.5
+            )
+            bar_ax.set_xlim(0, 100)
+            bar_ax.set_xlabel("% inertia", fontsize=6.5)
+            bar_ax.tick_params(labelsize=6.5)
+            bar_ax.set_facecolor("white")
+            for spine in bar_ax.spines.values():
+                spine.set_edgecolor("#cccccc")
+
+            plt.tight_layout()
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
+
+            # ── Summary metrics ───────────────────────────────────────────
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Dim 1 inertia", f"{dim1_pct}%")
+            m2.metric("Dim 2 inertia", f"{dim2_pct}%")
+            m3.metric("Total explained", f"{dim1_pct + dim2_pct:.1f}%")
 
             # ── Token proximity table ─────────────────────────────────────
-            with st.expander("🔍 Token proximity to each product (top 10 per product)"):
+            with st.expander("🔍 Nearest tokens per product (top 10)"):
                 prox_rows = []
                 for i, prod in enumerate(products):
                     rx, ry = row_coords[i, 0], row_coords[i, 1]
-                    # Euclidean distance from product point to each token
-                    dists = np.sqrt(
-                        (col_coords[:, 0] - rx)**2 + (col_coords[:, 1] - ry)**2
+                    dists  = np.sqrt(
+                        (col_coords[:, 0] - rx)**2 +
+                        (col_coords[:, 1] - ry)**2
                     )
-                    nearest_idx = np.argsort(dists)[:10]
-                    for rank, tidx in enumerate(nearest_idx, 1):
+                    for rank, tidx in enumerate(np.argsort(dists)[:10], 1):
                         prox_rows.append({
-                            "Product": prod,
-                            "Rank":    rank,
-                            "Token":   words[tidx],
-                            "Distance": round(dists[tidx], 4),
+                            "Product": prod, "Rank": rank,
+                            "Token": words[tidx],
+                            "Dist":  round(dists[tidx], 4),
                         })
                 prox_df = pd.DataFrame(prox_rows)
                 pivot   = prox_df.pivot(
                     index="Rank", columns="Product", values="Token")
                 st.dataframe(pivot, use_container_width=True)
+
+            # ── Per-product characteristic tokens (bar charts) ────────────
+            with st.expander("📊 Characteristic token profiles per product"):
+                n_prods = len(products)
+                ncols   = min(4, n_prods)
+                nrows   = (n_prods + ncols - 1) // ncols
+                fig2, axes2 = plt.subplots(
+                    nrows, ncols,
+                    figsize=(ncols * 4, nrows * 3.5),
+                    facecolor="white"
+                )
+                axes2 = np.array(axes2).flatten()
+                for i, (prod, color) in enumerate(zip(products, prod_colors)):
+                    ax2 = axes2[i]
+                    prod_tok = " ".join(
+                        df[df[p_col].astype(str) == str(prod)]["token_str"]
+                    ).split()
+                    tok_counts = Counter(prod_tok)
+                    top8 = tok_counts.most_common(8)
+                    if top8:
+                        toks_, cnts_ = zip(*top8)
+                        ax2.barh(list(toks_), list(cnts_),
+                                 color=color, alpha=0.82)
+                        ax2.invert_yaxis()
+                    short = prod[:22] + "…" if len(prod) > 22 else prod
+                    ax2.set_title(short, fontsize=8.5, fontweight="bold",
+                                  color=color, pad=4)
+                    ax2.tick_params(labelsize=7)
+                    ax2.set_xlabel("count", fontsize=7)
+                    ax2.set_facecolor("#FAFAFA")
+                for j in range(i + 1, len(axes2)):
+                    axes2[j].set_visible(False)
+                plt.tight_layout(pad=1.5)
+                st.pyplot(fig2, use_container_width=True)
+                plt.close(fig2)
 
     # ── Tab 4: Topic Lab ──────────────────────────────────────────────────
     with tab4:
